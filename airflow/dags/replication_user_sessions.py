@@ -107,7 +107,6 @@ def load(**kwargs):
             partition_date = datetime.strptime(partition_date, "%Y-%m-%d")
             partition_table_name = get_partition_table_name(partition_date)
 
-            # Check if the table exists
             cursor.execute(f"SELECT to_regclass('{partition_table_name}');")
             table_exists = cursor.fetchone()[0] is not None
 
@@ -141,7 +140,7 @@ def load(**kwargs):
 
 
 def quality_check():
-    """Проверка качества данных: поиск дубликатов по session_id."""
+    """Проверка качества данных: поиск дубликатов по session_id и проверка корректности разделения по партициям."""
     try:
         conn = psycopg2.connect(
             host=POSTGRES_HOST,
@@ -172,13 +171,36 @@ def quality_check():
                 for session_id, count in duplicates:
                     logging.error(f"Дубликат session_id: {session_id} встречается {count} раз в {partition}")
 
+
+        total_partition_errors = 0
+        for partition in partitions:
+            try:
+                parts = partition.split('_')
+                partition_year = int(parts[-2])
+                partition_month = int(parts[-1])
+            except Exception as e:
+                logging.error(f"Ошибка при извлечении даты из имени таблицы {partition}: {e}")
+                continue
+
+            cursor.execute(f"""
+                SELECT COUNT(*) FROM {partition}
+                WHERE EXTRACT(YEAR FROM partition_date)::int != {partition_year}
+                   OR EXTRACT(MONTH FROM partition_date)::int != {partition_month};
+            """)
+            wrong_count = cursor.fetchone()[0]
+            if wrong_count > 0:
+                total_partition_errors += wrong_count
+                logging.error(f"В таблице {partition} найдено {wrong_count} записей с некорректной датой партиции, ожидались {partition_year}-{partition_month:02d}")
+
         cursor.close()
         conn.close()
 
         if total_duplicates > 0:
             raise ValueError(f"Найдено {total_duplicates} дубликатов session_id!")
+        if total_partition_errors > 0:
+            raise ValueError(f"Найдено {total_partition_errors} записей с некорректной датой партиции!")
 
-        logging.info("Проверка качества данных прошла успешно, дубликаты не найдены.")
+        logging.info("Проверка качества данных прошла успешно, дубликаты и некорректные партиции не найдены.")
 
     except Exception as e:
         logging.error(f"Ошибка при проверке качества данных: {e}")
