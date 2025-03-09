@@ -26,7 +26,7 @@ default_args = {
 dag = DAG(
     "analytics_data_mart",
     default_args=default_args,
-    schedule_interval="0 1 * * *",  # ежедневное выполнение в 1:00
+    schedule_interval="0 1 * * *",
     catchup=False
 )
 
